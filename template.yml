@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: 'AWS::Serverless-2016-10-31'
+Description: My ATM app which uses AWS EventBridge to route transactions to other service
+
+Resources: 
+  atmProducerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: producer/
+      Handler: Producer::Producer.Function::FunctionHandler
+      Runtime: dotnetcore3.1
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource:
+                - '*'
+
+  atmConsumerCase1Fn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: consumer/
+      Handler: Consumer::Consumer.Function::ConsumerCase1Handler
+      Runtime: dotnetcore3.1
+
+  atmConsumerCase2Fn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: consumer/
+      Handler: Consumer::Consumer.Function::ConsumerCase2Handler
+      Runtime: dotnetcore3.1
+      Events:
+        Trigger:
+          Type: CloudWatchEvent
+          Properties:
+            Pattern:
+              source:
+                - custom.myATMapp
+              detail-type:
+                - transaction
+              detail:
+                location:
+                  - "prefix": "NY-"
+
+  atmConsumerCase3Fn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: consumer/
+      Handler: Consumer::Consumer.Function::ConsumerCase3Handler
+      Runtime: dotnetcore3.1
+      Events:
+        Trigger:
+          Type: CloudWatchEvent 
+          Properties:
+            Pattern:
+              source:
+                - custom.myATMapp
+              detail-type:
+                - transaction
+              detail:
+                result:
+                  - "anything-but": "approved"
+
+  EventRuleCase1:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Approved transactions"
+      EventPattern:
+        source:
+          - "custom.myATMapp"
+        detail-type:
+          - transaction
+        detail:
+          result:
+            - "approved"
+      State: "ENABLED"
+      Targets:
+        -
+          Arn:
+            Fn::GetAtt:
+              - "atmConsumerCase1Fn"
+              - "Arn"
+          Id: "atmConsumerTarget1"
+
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: "atmConsumerCase1Fn"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "EventRuleCase1"
+          - "Arn"
